@@ -15,6 +15,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from app.core.timer import FocusTimer, TimerState
 from app.core.focus_monitor import FocusMonitor
 from app.ui.tree_view import TreeView
+from app.ui.settings_dialog import SettingsDialog
 from app.utils.config import get_config
 
 class MainWindow:
@@ -38,14 +39,11 @@ class MainWindow:
         # 创建UI组件
         self._create_widgets()
         
+        # 获取配置
+        self.config = get_config()
+        
         # 初始化计时器
-        duration = get_config().get("focus_duration", 25 * 60)  # 默认25分钟
-        self.timer = FocusTimer(
-            duration=duration,
-            on_tick=self._update_timer_display,
-            on_complete=self._on_timer_complete,
-            on_fail=self._on_timer_fail
-        )
+        self._initialize_timer()
         
         # 初始化焦点监控
         self.focus_monitor = FocusMonitor(
@@ -62,13 +60,25 @@ class MainWindow:
         self.main_frame = ttk.Frame(self.master, padding="20")
         self.main_frame.pack(fill=tk.BOTH, expand=True)
         
+        # 顶部工具栏
+        self.toolbar = ttk.Frame(self.main_frame)
+        self.toolbar.pack(fill=tk.X, pady=(0, 10))
+        
         # 标题
         self.title_label = ttk.Label(
-            self.main_frame, 
+            self.toolbar, 
             text="Forest", 
             font=("Arial", 20, "bold")
         )
-        self.title_label.pack(pady=(0, 20))
+        self.title_label.pack(side=tk.LEFT, pady=(0, 10))
+        
+        # 设置按钮
+        self.settings_button = ttk.Button(
+            self.toolbar,
+            text="⚙️ Settings",
+            command=self._open_settings
+        )
+        self.settings_button.pack(side=tk.RIGHT, pady=(5, 10))
         
         # 树木视图
         self.tree_view = TreeView(self.main_frame)
@@ -106,6 +116,16 @@ class MainWindow:
         )
         self.give_up_button.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=5)
     
+    def _initialize_timer(self):
+        """初始化计时器"""
+        duration = self.config.get("focus_duration", 25 * 60)  # 默认25分钟
+        self.timer = FocusTimer(
+            duration=duration,
+            on_tick=self._update_timer_display,
+            on_complete=self._on_timer_complete,
+            on_fail=self._on_timer_fail
+        )
+    
     def _update_timer_display(self, remaining_seconds):
         """更新计时器显示"""
         minutes = remaining_seconds // 60
@@ -119,21 +139,39 @@ class MainWindow:
         # 确保在主线程中更新UI
         self.master.update_idletasks()
     
+    def _open_settings(self):
+        """打开设置对话框"""
+        # 如果定时器正在运行，不允许更改设置
+        if self.timer.state == TimerState.RUNNING or self.timer.state == TimerState.PAUSED:
+            messagebox.showwarning("Settings", "You can change settings when you are NOT in a focus session.")
+            return
+        
+        # 打开设置对话框
+        dialog = SettingsDialog(self.master)
+        
+        # 如果设置已更改，重新加载配置和初始化计时器
+        if hasattr(dialog, 'result') and dialog.result:
+            self.config = get_config()
+            self._initialize_timer()
+            self._update_timer_display(self.timer.remaining)
+    
     def _on_start(self):
         """开始按钮点击处理"""
         if self.timer.state == TimerState.IDLE:
             # 开始新的专注会话
             self.timer.start()
-            self.start_button.config(text="暂停", state=tk.NORMAL)
+            self.start_button.config(text="Pause", state=tk.NORMAL)
             self.give_up_button.config(state=tk.NORMAL)
+            self.settings_button.config(state=tk.DISABLED)  # 禁用设置按钮
             
             # 开始焦点监控
-            self.focus_monitor.start_monitoring()
+            if self.config.get("strict_mode", False):
+                self.focus_monitor.start_monitoring()
             
         elif self.timer.state == TimerState.RUNNING:
             # 暂停当前会话
             self.timer.pause()
-            self.start_button.config(text="继续")
+            self.start_button.config(text="Resume")
             
             # 暂停焦点监控
             self.focus_monitor.stop_monitoring()
@@ -141,14 +179,15 @@ class MainWindow:
         elif self.timer.state == TimerState.PAUSED:
             # 继续当前会话
             self.timer.resume()
-            self.start_button.config(text="暂停")
+            self.start_button.config(text="Pause")
             
             # 恢复焦点监控
-            self.focus_monitor.start_monitoring()
+            if self.config.get("strict_mode", False):
+                self.focus_monitor.start_monitoring()
     
     def _on_give_up(self):
         """放弃按钮点击处理"""
-        if messagebox.askyesno("确认放弃", "确定要放弃当前的专注吗？您的树将会枯萎！"):
+        if messagebox.askyesno("Confirm Give Up", "Are you sure you want to give up? Your tree will wither!"):
             self.timer.fail()
             self.tree_view.set_tree_dead()
             self._reset_ui()
@@ -156,7 +195,7 @@ class MainWindow:
     def _on_timer_complete(self):
         """计时器完成回调"""
         self.focus_monitor.stop_monitoring()
-        messagebox.showinfo("恭喜", "专注完成！您的树已经成长完全！")
+        messagebox.showinfo("Congratulations!", "Focus session ended. You planted a tree!")
         self._reset_ui()
     
     def _on_timer_fail(self):
@@ -166,21 +205,23 @@ class MainWindow:
     
     def _on_focus_lost(self):
         """窗口失去焦点回调"""
-        if self.timer.state == TimerState.RUNNING:
-            # 在这个MVP版本中，我们可以选择提醒用户或者什么都不做
-            # 后续可以在这里实现更严格的控制，比如自动失败
-            pass
+        if self.timer.state == TimerState.RUNNING and self.config.get("strict_mode", False):
+            messagebox.showwarning("Focus Session Interrupted", "You have left this window and failed!")
+            self.timer.fail()
+            self.tree_view.set_tree_dead()
+            self._reset_ui()
     
     def _reset_ui(self):
         """重置UI到初始状态"""
-        self.start_button.config(text="开始专注", state=tk.NORMAL)
+        self.start_button.config(text="Plant", state=tk.NORMAL)
         self.give_up_button.config(state=tk.DISABLED)
+        self.settings_button.config(state=tk.NORMAL)  # 恢复设置按钮
         self._update_timer_display(self.timer.duration)
     
     def _on_close(self):
         """窗口关闭处理"""
-        if self.timer.state == TimerState.RUNNING:
-            if messagebox.askyesno("确认退出", "专注尚未完成，确定要退出吗？"):
+        if self.timer.state == TimerState.RUNNING or self.timer.state == TimerState.PAUSED:
+            if messagebox.askyesno("Confirm Exit", "The focus session is in progress. Are you sure you want to exit?"):
                 self.focus_monitor.stop_monitoring()
                 self.master.destroy()
         else:
