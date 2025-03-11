@@ -14,7 +14,7 @@ def main():
     
     # 创建主应用
     root = tk.Tk()
-    root.title("专注森林")
+    root.title("Forest")
     
     # 设置应用图标
     if os.path.exists("resources/icon.ico"):
