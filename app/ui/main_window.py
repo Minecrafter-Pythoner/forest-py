@@ -8,6 +8,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import os
 import sys
+import time
 
 # 确保能够正确导入项目中的其他模块
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -16,7 +17,9 @@ from app.core.timer import FocusTimer, TimerState
 from app.core.focus_monitor import FocusMonitor
 from app.ui.tree_view import TreeView
 from app.ui.settings_dialog import SettingsDialog
+from app.ui.history_view import HistoryView
 from app.utils.config import get_config
+from app.utils.history import HistoryManager, SessionStatus
 
 class MainWindow:
     """应用程序主窗口"""
@@ -51,6 +54,9 @@ class MainWindow:
             on_focus_lost=self._on_focus_lost
         )
         
+        # 会话开始时间
+        self.session_start_time = None
+        
         # 更新定时器显示
         self._update_timer_display(self.timer.remaining)
     
@@ -71,6 +77,14 @@ class MainWindow:
             font=("Arial", 20, "bold")
         )
         self.title_label.pack(side=tk.LEFT, pady=(0, 10))
+        
+        # 历史记录按钮
+        self.history_button = ttk.Button(
+            self.toolbar,
+            text="📊 History",
+            command=self._open_history
+        )
+        self.history_button.pack(side=tk.RIGHT, pady=(5, 10), padx=(0, 10))
         
         # 设置按钮
         self.settings_button = ttk.Button(
@@ -155,14 +169,22 @@ class MainWindow:
             self._initialize_timer()
             self._update_timer_display(self.timer.remaining)
     
+    def _open_history(self):
+        """打开历史记录窗口"""
+        HistoryView(self.master)
+    
     def _on_start(self):
         """开始按钮点击处理"""
         if self.timer.state == TimerState.IDLE:
+            # 记录会话开始时间
+            self.session_start_time = time.time()
+            
             # 开始新的专注会话
             self.timer.start()
             self.start_button.config(text="Pause", state=tk.NORMAL)
             self.give_up_button.config(state=tk.NORMAL)
             self.settings_button.config(state=tk.DISABLED)  # 禁用设置按钮
+            self.history_button.config(state=tk.DISABLED)   # 禁用历史按钮
             
             # 开始焦点监控
             if self.config.get("strict_mode", False):
@@ -188,6 +210,21 @@ class MainWindow:
     def _on_give_up(self):
         """放弃按钮点击处理"""
         if messagebox.askyesno("Confirm Give Up", "Are you sure you want to give up? Your tree will wither!"):
+            # 记录会话
+            if self.session_start_time is not None:
+                end_time = time.time()
+                actual_duration = int(end_time - self.session_start_time)
+                
+                # 添加到历史记录
+                HistoryManager.add_session(
+                    start_time=self.session_start_time,
+                    end_time=end_time,
+                    planned_duration=self.timer.duration,
+                    actual_duration=actual_duration,
+                    status=SessionStatus.FAILED,
+                    notes="Ended by user"
+                )
+            
             self.timer.fail()
             self.tree_view.set_tree_dead()
             self._reset_ui()
@@ -195,12 +232,44 @@ class MainWindow:
     def _on_timer_complete(self):
         """计时器完成回调"""
         self.focus_monitor.stop_monitoring()
+        
+        # 记录成功完成的会话
+        if self.session_start_time is not None:
+            end_time = time.time()
+            actual_duration = int(end_time - self.session_start_time)
+            
+            # 添加到历史记录
+            HistoryManager.add_session(
+                start_time=self.session_start_time,
+                end_time=end_time,
+                planned_duration=self.timer.duration,
+                actual_duration=actual_duration,
+                status=SessionStatus.COMPLETED,
+                notes="Success"
+            )
+        
         messagebox.showinfo("Congratulations!", "Focus session ended. You planted a tree!")
         self._reset_ui()
     
     def _on_timer_fail(self):
         """计时器失败回调"""
         self.focus_monitor.stop_monitoring()
+        
+        # 如果是外部原因导致的失败，记录会话
+        if self.session_start_time is not None and self.timer.state == TimerState.FAILED:
+            end_time = time.time()
+            actual_duration = int(end_time - self.session_start_time)
+            
+            # 添加到历史记录
+            HistoryManager.add_session(
+                start_time=self.session_start_time,
+                end_time=end_time,
+                planned_duration=self.timer.duration,
+                actual_duration=actual_duration,
+                status=SessionStatus.INTERRUPTED,
+                notes="Session interrupted"
+            )
+        
         self._reset_ui()
     
     def _on_focus_lost(self):
@@ -216,12 +285,31 @@ class MainWindow:
         self.start_button.config(text="Plant", state=tk.NORMAL)
         self.give_up_button.config(state=tk.DISABLED)
         self.settings_button.config(state=tk.NORMAL)  # 恢复设置按钮
+        self.history_button.config(state=tk.NORMAL)   # 恢复历史按钮
         self._update_timer_display(self.timer.duration)
+        
+        # 重置会话开始时间
+        self.session_start_time = None
     
     def _on_close(self):
         """窗口关闭处理"""
         if self.timer.state == TimerState.RUNNING or self.timer.state == TimerState.PAUSED:
             if messagebox.askyesno("Confirm Exit", "The focus session is in progress. Are you sure you want to exit?"):
+                # 如果正在进行中的会话被终止，记录为中断
+                if self.session_start_time is not None:
+                    end_time = time.time()
+                    actual_duration = int(end_time - self.session_start_time)
+                    
+                    # 添加到历史记录
+                    HistoryManager.add_session(
+                        start_time=self.session_start_time,
+                        end_time=end_time,
+                        planned_duration=self.timer.duration,
+                        actual_duration=actual_duration,
+                        status=SessionStatus.INTERRUPTED,
+                        notes="User exited the app and the session was interrupted"
+                    )
+                
                 self.focus_monitor.stop_monitoring()
                 self.master.destroy()
         else:
