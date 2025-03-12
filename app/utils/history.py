@@ -133,6 +133,8 @@ class HistoryManager:
         
         # 计算截止时间点（过去days天的起始时间）
         now = time.time()
+        if days == 0:
+            days = 2000*365
         cutoff_time = now - (days * 24 * 60 * 60)
         
         # 筛选时间范围内的会话记录
