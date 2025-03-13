@@ -6,15 +6,15 @@ Forest - Say no to distractions
 
 import os
 import sys
+import tkinter as tk
 from app.ui.main_window import MainWindow
 
 def main():
     """应用程序入口点"""
-    import tkinter as tk
     
     # 创建主应用
     root = tk.Tk()
-    root.title("Forest")
+    root.title("PyFocus")
     
     # 设置应用图标
     if os.path.exists("resources/icon.ico"):

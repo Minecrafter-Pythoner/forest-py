@@ -56,6 +56,7 @@ class MainWindow:
         
         # 会话开始时间
         self.session_start_time = None
+        self.focus_lost_flag = None
         
         # 更新定时器显示
         self._update_timer_display(self.timer.remaining)
@@ -274,11 +275,13 @@ class MainWindow:
     
     def _on_focus_lost(self):
         """窗口失去焦点回调"""
-        if self.timer.state == TimerState.RUNNING and self.config.get("strict_mode", False):
+        if self.timer.state == TimerState.RUNNING and self.config.get("strict_mode", False) and not self.focus_lost_flag:
+            self.focus_lost_flag = True
             messagebox.showwarning("Focus Session Interrupted", "You have left this window and failed!")
             self.timer.fail()
             self.tree_view.set_tree_dead()
             self._reset_ui()
+            self.focus_lost_flag = None
     
     def _reset_ui(self):
         """重置UI到初始状态"""
