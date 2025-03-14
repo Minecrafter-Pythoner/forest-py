@@ -55,11 +55,8 @@ jobs:
       
       - name: Create Release
         id: create_release
-        uses: softprops/action-gh-release@v2
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: ${{ github.ref }}
-          name: PyFocus ${{ steps.get_version.outputs.VERSION }}
-          draft: true
-          files: PyFocus-${{ steps.get_version.outputs.VERSION }}-x64-windows.zip
+          artifacts: "PyFocus-${{ steps.get_version.outputs.VERSION }}-x64-windows.zip"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
