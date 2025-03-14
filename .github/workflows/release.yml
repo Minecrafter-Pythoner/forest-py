@@ -58,5 +58,6 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           artifacts: "PyFocus-${{ steps.get_version.outputs.VERSION }}-x64-windows.zip"
+          draft: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
